@@ -122,7 +122,10 @@ def submit(job):
     c = copy.deepcopy(job['crab_config'])
 
     c.JobType.psetName = job['pset']
-    c.JobType.outputFiles.append(module.process.framework.output.value())
+    if hasattr(module.process, "framework") and hasattr(module.process.framework, "output"):
+        c.JobType.outputFiles.append(module.process.framework.output.value())
+    if hasattr(module.process, "TFileService") and hasattr(module.process.TFileService, "fileName"):
+        c.JobType.outputFiles.append(module.process.TFileService.fileName.value())
 
     if hasattr(module.process, 'gridin') and hasattr(module.process.gridin, 'input_files') and len(module.process.gridin.input_files) > 0:
         if not hasattr(c.JobType, 'inputFiles'):

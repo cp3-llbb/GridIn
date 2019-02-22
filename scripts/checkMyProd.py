@@ -34,6 +34,20 @@ def get_options():
     options = parser.parse_args()
     return options
 
+# helper method
+def jobstatusPerStage(jobList):
+    stages = dict()
+    for jli in jobList:
+        status, ji = tuple(jli)
+        if "-" in ji:
+            stage, sji = ji.split("-")
+        else:
+            stage, sji = "0", ji
+        if stage not in stages:
+            stages[stage] = dict()
+        stages[stage][sji] = status
+    return stages
+
 def main():
     #####
     # Initialization
@@ -115,24 +129,21 @@ def main():
         print "#####", task, "#####"
         try:
             status = utils.send_crab_command('status', dir = taskdir)
-            ## workaround for https://github.com/dmwm/CRABClient/issues/4702
-            if all( sjDict["State"] == "finished" for sjID, sjDict in status["jobs"].iteritems() ):
-                status["status"] = "COMPLETED"
-            if any( sjDict["State"] == "failed" for sjID, sjDict in status["jobs"].iteritems() ):
-                status["status"] = "FAILED"
+            if status["dbStatus"] != "SUBMITTED": ## still being processed by the CRAB server
+                status_code = status["dbStatus"]
+            else: ## submitted to the grid, get the DAG status (SUBMITTED, COMPLETED or FAILED)
+                status_code = status["dagStatus"]
+                if status_code == "SUBMITTED": ## can already try to resubmit if any of the followup stages have failed jobs
+                    jobsPerStage = jobstatusPerStage(status["jobList"])
+                    lSt = "0" if len(jobsPerStage) == 1 else max(jobsPerStage.iterkeys(), key=lambda st : int(st))
+                    if any(jst == "failed" for sji,jst in jobsPerStage[lSt].iteritems()):
+                        status_code = "TORESUBMIT"
+            tasks[status_code].append(task)
         except CRABClient.ClientExceptions.CachefileNotFoundException:
             print("Something went wrong: directory {} was not properly created. Will count it as 'SUBMITFAILED'...\n".format(taskdir))
             tasks['SUBMITFAILED'].append(task)
             continue
-        #except httplib.HTTPException:
-        #    print("HTTP error when requesting status for task {}. Trying again.\n".format(taskdir))
-        #    status = crabCommand('status', dir = taskdir)
-    # {'status': 'COMPLETED', 'schedd': 'crab3-3@submit-4.t2.ucsd.edu', 'saveLogs': 'T', 'jobsPerStatus': {'finished': 1}, 'jobs': {'1': {'State': 'finished'}}, 'publication': {'disabled': []}, 'taskWarningMsg': [], 'publicationFailures': {}, 'outdatasets': None, 'statusFailureMsg': '', 'taskFailureMsg': '', 'failedJobdefs': 0, 'ASOURL': 'https://cmsweb.cern.ch/couchdb', 'totalJobdefs': 0, 'jobSetID': '151022_173830:obondu_crab_HWminusJ_HToWW_M125_13TeV_powheg_pythia8_MiniAODv2', 'jobdefErrors': [], 'collector': 'cmssrv221.fnal.gov,vocms099.cern.ch', 'jobList': [['finished', 1]]}
 
-        status_code = status['status']
-        if 'failed' in status['jobsPerStatus']:
-            status_code = 'TORESUBMIT'
-        tasks[status_code].append(task)
     
     #####
     # Dump the crab status into the output json file
